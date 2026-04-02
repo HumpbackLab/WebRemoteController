@@ -269,6 +269,19 @@ body {
     margin-bottom: 15px;
 }
 
+.serial-config {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.serial-config-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
 .mode-btn {
     flex: 1;
     padding: 10px;
@@ -404,6 +417,20 @@ body {
 }
 
 .log-entry .message {
+    color: var(--text-color);
+}
+
+.build-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 0 4px;
+}
+
+.build-value {
     color: var(--text-color);
 }
 

@@ -16,6 +16,7 @@ export class ELRS {
             telemetry: [],
             linkStats: [],
             connected: [],
+            ready: [],
             disconnected: [],
             error: [],
             devicePing: [],
@@ -28,6 +29,7 @@ export class ELRS {
         this.isWriting = false;
         this.heartbeatInterval = null;
         this.handshakeState = 'idle'; // idle, pinging, ready
+        this.connectionMode = 'direct-serial';
 
         this.parser.onTelemetry((telemetry) => {
             this.emit('telemetry', telemetry);
@@ -66,12 +68,14 @@ export class ELRS {
     /**
      * Connect to ELRS TX via Web Serial
      */
-    async connect(baudRate = 420000) {
+    async connect(baudRate = 115200, options = {}) {
         if (!('serial' in navigator)) {
             const error = new Error('Web Serial API not supported. Use Chrome, Edge, or Opera.');
             this.emit('error', error);
             throw error;
         }
+
+        this.connectionMode = options.mode || 'direct-serial';
 
         try {
             this.port = await navigator.serial.requestPort({
@@ -89,7 +93,10 @@ export class ELRS {
             this.keepReading = true;
             this.parser.reset();
             this.readLoop();
-            this.startHandshake();
+            if (this.connectionMode === 'handset') {
+                this.startHandshake();
+            }
+            this.emit('connected');
 
             return true;
         } catch (error) {
@@ -107,7 +114,7 @@ export class ELRS {
         }
 
         this.handshakeState = 'ready';
-        this.emit('connected');
+        this.emit('ready');
     }
 
     /**
@@ -249,6 +256,7 @@ export class ELRS {
         this.stopHeartbeat();
         this.keepReading = false;
         this.handshakeState = 'idle';
+        this.connectionMode = 'direct-serial';
         this.parser.reset();
         this.rejectPendingWrites(new Error('Disconnected'));
 
@@ -366,7 +374,7 @@ export class ELRS {
      * Send Bind command
      */
     async enterBindMode() {
-        const packet = CRSF.buildBindPacket();
+        const packet = CRSF.buildSettingsWritePacket(0x01, 0x00);
         await this.sendRaw(packet);
         console.log('Bind command sent');
     }
@@ -375,13 +383,13 @@ export class ELRS {
      * Send WiFi mode command
      */
     async enterWifiMode() {
-        const packet = CRSF.buildWifiPacket();
+        const packet = CRSF.buildSettingsWritePacket(0x02, 0x00);
         await this.sendRaw(packet);
         console.log('WiFi mode command sent');
     }
 
     supportsWifiMode() {
-        return false;
+        return this.connectionMode === 'direct-serial';
     }
 
     /**

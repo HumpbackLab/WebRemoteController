@@ -10,7 +10,8 @@ import { getGamepadManager } from './gamepad.js';
 // Global state
 const state = {
     mode: 'virtual', // 'virtual' or 'gamepad'
-    connected: false
+    connected: false,
+    baudRate: 115200
 };
 
 // Get instances
@@ -29,16 +30,20 @@ const elements = {
     gamepadInfo: document.getElementById('gamepadInfo'),
     gamepadSelect: document.getElementById('gamepadSelect'),
     gamepadStatus: document.getElementById('gamepadStatus'),
+    baudRateSelect: document.getElementById('baudRateSelect'),
     bindBtn: document.getElementById('bindBtn'),
     wifiBtn: document.getElementById('wifiBtn'),
     resetBtn: document.getElementById('resetBtn'),
-    logPanel: document.getElementById('logPanel')
+    logPanel: document.getElementById('logPanel'),
+    buildCommit: document.getElementById('buildCommit')
 };
 
 // Initialize
 function init() {
     log('Initializing ELRS Web Remote...');
-    elements.wifiBtn.title = 'WiFi mode command is not implemented yet';
+    elements.wifiBtn.title = 'Direct serial settings command';
+    elements.baudRateSelect.value = String(state.baudRate);
+    loadBuildInfo();
 
     // Create virtual joystick
     joystick = new VirtualJoystick('joystickContainer');
@@ -61,6 +66,20 @@ function init() {
     startChannelLoop();
 
     log('Ready!');
+}
+
+async function loadBuildInfo() {
+    try {
+        const response = await fetch('version.json', { cache: 'no-store' });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const buildInfo = await response.json();
+        elements.buildCommit.textContent = buildInfo.commit?.slice(0, 7) || 'unknown';
+    } catch (error) {
+        elements.buildCommit.textContent = 'workspace';
+    }
 }
 
 function setupELRSCallbacks() {
@@ -125,7 +144,8 @@ function setupUIEvents() {
     // Connect button
     elements.connectBtn.addEventListener('click', async () => {
         try {
-            await elrs.connect(420000);
+            log(`Opening direct serial port at ${state.baudRate} baud`);
+            await elrs.connect(state.baudRate, { mode: 'direct-serial' });
         } catch (error) {
             if (error.name !== 'NotFoundError') {
                 log(`Connection failed: ${error.message}`);
@@ -152,6 +172,14 @@ function setupUIEvents() {
         const index = parseInt(e.target.value);
         if (!isNaN(index)) {
             gamepadManager.setActiveGamepad(index);
+        }
+    });
+
+    elements.baudRateSelect.addEventListener('change', (e) => {
+        const baudRate = parseInt(e.target.value, 10);
+        if (!Number.isNaN(baudRate)) {
+            state.baudRate = baudRate;
+            log(`Baud rate set to ${baudRate}`);
         }
     });
 
@@ -211,7 +239,7 @@ function updateConnectionUI(connected) {
     elements.connectBtn.disabled = connected;
     elements.disconnectBtn.disabled = !connected;
     elements.bindBtn.disabled = !connected;
-    elements.wifiBtn.disabled = !connected || !elrs.supportsWifiMode();
+    elements.wifiBtn.disabled = !connected;
 
     if (connected) {
         // Start sending RC data

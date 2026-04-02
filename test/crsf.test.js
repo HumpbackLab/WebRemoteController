@@ -72,6 +72,7 @@ test('extended DEVICE_PING frames are complete and parse correctly', () => {
 
     assert.equal(frame.length, 6);
     assert.equal(frame[1], 4);
+    assert.equal(frame[0], CRSF.CRSF_ADDRESS_RADIO_TRANSMITTER);
     assert.equal(frame.at(-1), expectedCRC(frame));
     assert.ok(telemetry);
     assert.equal(telemetry.type, 'device_ping');
@@ -90,9 +91,24 @@ test('extended DEVICE_INFO frames preserve device name', () => {
     const telemetry = CRSF.parseTelemetry(frame);
 
     assert.ok(telemetry);
+    assert.equal(frame[0], CRSF.CRSF_ADDRESS_RADIO_TRANSMITTER);
     assert.equal(telemetry.type, 'device_info');
     assert.equal(telemetry.data.deviceName, 'WebRadio');
     assert.equal(frame.at(-1), expectedCRC(frame));
+});
+
+test('bind command matches handset extended-command addressing', () => {
+    const frame = CRSF.buildBindPacket();
+    const telemetry = CRSF.parseTelemetry(frame);
+
+    assert.equal(frame[0], CRSF.CRSF_ADDRESS_RADIO_TRANSMITTER);
+    assert.equal(telemetry.type, 'unknown');
+    assert.equal(telemetry.destAddr, CRSF.CRSF_ADDRESS_CRSF_TRANSMITTER);
+    assert.equal(telemetry.origAddr, CRSF.CRSF_ADDRESS_RADIO_TRANSMITTER);
+    assert.deepEqual(Array.from(telemetry.data), [
+        CRSF.CRSF_COMMAND_SUBCMD_RX,
+        CRSF.CRSF_COMMAND_SUBCMD_RX_BIND
+    ]);
 });
 
 test('stream parser emits telemetry once a full frame arrives', () => {
@@ -124,4 +140,10 @@ test('buildWifiPacket fails closed instead of sending bind', () => {
         () => CRSF.buildWifiPacket(),
         /not implemented/i
     );
+});
+
+test('settings write packet matches LetsFly direct serial format', () => {
+    const frame = CRSF.buildSettingsWritePacket(0x01, 0x00);
+    assert.deepEqual(Array.from(frame), [0xEE, 0x06, 0x2D, 0xEE, 0xEA, 0x01, 0x00, frame[7]]);
+    assert.equal(frame[7], CRSF.calcCRC(frame.subarray(2, 7)));
 });

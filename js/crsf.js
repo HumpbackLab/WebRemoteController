@@ -182,6 +182,23 @@ export function buildRCPacket(channels) {
 }
 
 /**
+ * Build a LetsFly-style settings write packet.
+ * This is used by some direct USB-TTL serial setups instead of handset discovery.
+ */
+export function buildSettingsWritePacket(command, value) {
+    const packet = new Uint8Array(8);
+    packet[0] = CRSF_ADDRESS_CRSF_TRANSMITTER;
+    packet[1] = 6;
+    packet[2] = 0x2D; // TYPE_SETTINGS_WRITE
+    packet[3] = CRSF_ADDRESS_CRSF_TRANSMITTER;
+    packet[4] = CRSF_ADDRESS_RADIO_TRANSMITTER;
+    packet[5] = command & 0xFF;
+    packet[6] = value & 0xFF;
+    packet[7] = calcCRC(packet.subarray(2, 7));
+    return packet;
+}
+
+/**
  * Build a Bind command packet
  */
 export function buildBindPacket() {
@@ -189,20 +206,12 @@ export function buildBindPacket() {
         CRSF_COMMAND_SUBCMD_RX,
         CRSF_COMMAND_SUBCMD_RX_BIND
     ]);
-
-    const packet = new Uint8Array(2 + 1 + payload.length + 1);
-    let idx = 0;
-    packet[idx++] = CRSF_ADDRESS_CRSF_RECEIVER;
-    packet[idx++] = payload.length + 2;
-    packet[idx++] = CRSF_FRAMETYPE_COMMAND;
-    packet.set(payload, idx);
-    idx += payload.length;
-
-    // Calculate CRC from type onwards
-    const crc = calcCRC(packet.subarray(2, 2 + 1 + payload.length));
-    packet[idx] = crc;
-
-    return packet;
+    return buildExtendedFrame(
+        CRSF_FRAMETYPE_COMMAND,
+        CRSF_ADDRESS_CRSF_TRANSMITTER,
+        CRSF_ADDRESS_RADIO_TRANSMITTER,
+        payload
+    );
 }
 
 /**
@@ -224,7 +233,7 @@ export function buildExtendedFrame(frameType, destAddr, origAddr, payload = new 
     const packet = new Uint8Array(2 + frameSize); // addr + len + type + dest + orig + payload + crc
 
     let idx = 0;
-    packet[idx++] = origAddr;          // device_addr (我们作为发送方)
+    packet[idx++] = origAddr;          // handset serial address
     packet[idx++] = frameSize;         // frame_size (after this byte: type + dest + orig + payload + crc)
     packet[idx++] = frameType;         // type
     packet[idx++] = destAddr;          // dest_addr (扩展头)
@@ -243,11 +252,10 @@ export function buildExtendedFrame(frameType, destAddr, origAddr, payload = new 
  * Build a DEVICE_PING packet (handset → TX)
  */
 export function buildDevicePing() {
-    // DEVICE_PING is an extended frame with empty payload
     return buildExtendedFrame(
         CRSF_FRAMETYPE_DEVICE_PING,
-        CRSF_ADDRESS_CRSF_TRANSMITTER,  // dest: TX module
-        CRSF_ADDRESS_RADIO_TRANSMITTER   // orig: handset/radio
+        CRSF_ADDRESS_CRSF_TRANSMITTER,
+        CRSF_ADDRESS_RADIO_TRANSMITTER
     );
 }
 

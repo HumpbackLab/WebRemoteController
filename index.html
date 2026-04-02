@@ -29,6 +29,19 @@
                 <!-- Mode Selector -->
                 <div class="panel">
                     <h3>Input Mode</h3>
+                    <div class="serial-config">
+                        <label class="serial-config-label" for="baudRateSelect">Baud Rate</label>
+                        <select class="gamepad-select" id="baudRateSelect">
+                            <option value="115200" selected>115200 (LetsFly / USB-TTL)</option>
+                            <option value="420000">420000</option>
+                            <option value="400000">400000</option>
+                            <option value="5250000">5250000 (Handset UART)</option>
+                            <option value="3750000">3750000</option>
+                            <option value="2250000">2250000</option>
+                            <option value="1870000">1870000</option>
+                            <option value="921600">921600</option>
+                        </select>
+                    </div>
                     <div class="mode-selector">
                         <button class="mode-btn active" id="modeVirtual">Virtual Joystick</button>
                         <button class="mode-btn" id="modeGamepad">Gamepad</button>
@@ -118,6 +131,11 @@
                 <div class="panel">
                     <h3>Log</h3>
                     <div class="log-panel" id="logPanel"></div>
+                </div>
+
+                <div class="build-meta">
+                    <span class="build-label">Commit</span>
+                    <span class="build-value" id="buildCommit">loading</span>
                 </div>
             </aside>
         </main>
