@@ -64,6 +64,7 @@ function init() {
 
     // Start channel update loop
     startChannelLoop();
+    syncInputAvailability();
 
     log('Ready!');
 }
@@ -119,7 +120,12 @@ function setupELRSCallbacks() {
 function setupGamepadCallbacks() {
     gamepadManager.on('connected', (gamepad) => {
         log(`Gamepad connected: ${gamepad.id}`);
+        if (state.mode !== 'gamepad') {
+            setMode('gamepad');
+            log('Switched to gamepad mode');
+        }
         updateGamepadList();
+        syncInputAvailability();
         elements.gamepadStatus.textContent = gamepad.id;
         elements.gamepadStatus.classList.add('connected');
     });
@@ -127,6 +133,7 @@ function setupGamepadCallbacks() {
     gamepadManager.on('disconnected', (gamepad) => {
         log(`Gamepad disconnected: ${gamepad.id}`);
         updateGamepadList();
+        syncInputAvailability();
         if (!gamepadManager.getActiveGamepad()) {
             elements.gamepadStatus.textContent = 'No gamepad connected';
             elements.gamepadStatus.classList.remove('connected');
@@ -224,6 +231,11 @@ function setupUIEvents() {
 }
 
 function setMode(mode) {
+    if (mode === 'virtual' && hasConnectedGamepad()) {
+        log('Virtual joystick is disabled while a gamepad is connected');
+        return;
+    }
+
     state.mode = mode;
 
     // Update UI
@@ -233,6 +245,19 @@ function setMode(mode) {
 
     log(`Mode changed to: ${mode}`);
     updateGamepadList();
+    syncInputAvailability();
+}
+
+function hasConnectedGamepad() {
+    return gamepadManager.getConnectedGamepads().length > 0;
+}
+
+function syncInputAvailability() {
+    const gamepadConnected = hasConnectedGamepad();
+    elements.modeVirtual.disabled = gamepadConnected;
+    if (joystick) {
+        joystick.setEnabled(!gamepadConnected);
+    }
 }
 
 function updateConnectionUI(connected) {

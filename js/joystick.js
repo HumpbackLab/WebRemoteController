@@ -38,6 +38,7 @@ export class VirtualJoystick {
 
         // Switch states
         this.switches = new Array(8).fill(false);
+        this.enabled = true;
 
         this.callbacks = [];
 
@@ -96,6 +97,7 @@ export class VirtualJoystick {
         // Create channel bars
         this.createChannelBars();
         this.updateChannelBars();
+        this.updateEnabledState();
     }
 
     createChannelBars() {
@@ -158,14 +160,14 @@ export class VirtualJoystick {
         // Outer ring
         ctx.beginPath();
         ctx.arc(centerX, centerY, outerRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = '#666';
+        ctx.strokeStyle = this.enabled ? '#666' : '#444';
         ctx.lineWidth = 2;
         ctx.stroke();
 
         // Dead zone circle
         ctx.beginPath();
         ctx.arc(centerX, centerY, deadZone, 0, Math.PI * 2);
-        ctx.strokeStyle = '#444';
+        ctx.strokeStyle = this.enabled ? '#444' : '#2A2A2A';
         ctx.lineWidth = 1;
         ctx.stroke();
 
@@ -175,7 +177,7 @@ export class VirtualJoystick {
         ctx.lineTo(centerX + outerRadius, centerY);
         ctx.moveTo(centerX, centerY - outerRadius);
         ctx.lineTo(centerX, centerY + outerRadius);
-        ctx.strokeStyle = '#333';
+        ctx.strokeStyle = this.enabled ? '#333' : '#252525';
         ctx.lineWidth = 1;
         ctx.stroke();
 
@@ -186,7 +188,11 @@ export class VirtualJoystick {
         // Stick
         ctx.beginPath();
         ctx.arc(stickX, stickY, innerRadius, 0, Math.PI * 2);
-        ctx.fillStyle = stick.isDragging ? '#4CAF50' : '#2196F3';
+        if (!this.enabled) {
+            ctx.fillStyle = '#555';
+        } else {
+            ctx.fillStyle = stick.isDragging ? '#4CAF50' : '#2196F3';
+        }
         ctx.fill();
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
@@ -241,6 +247,7 @@ export class VirtualJoystick {
         const clamp = (v) => Math.max(-1, Math.min(1, v));
 
         const handleStart = (e) => {
+            if (!this.enabled) return;
             e.preventDefault();
             stick.isDragging = true;
             const pos = getPos(e);
@@ -251,6 +258,7 @@ export class VirtualJoystick {
         };
 
         const handleMove = (e) => {
+            if (!this.enabled) return;
             if (!stick.isDragging) return;
             e.preventDefault();
             const pos = getPos(e);
@@ -261,6 +269,10 @@ export class VirtualJoystick {
         };
 
         const handleEnd = (e) => {
+            if (!this.enabled) {
+                stick.isDragging = false;
+                return;
+            }
             e.preventDefault();
             stick.isDragging = false;
             // Return to center except for left stick Y (throttle)
@@ -298,6 +310,9 @@ export class VirtualJoystick {
     }
 
     toggleSwitch(index, btn) {
+        if (!this.enabled) {
+            return;
+        }
         this.switches[index] = !this.switches[index];
 
         // Update button visual
@@ -330,6 +345,32 @@ export class VirtualJoystick {
 
     onChange(callback) {
         this.callbacks.push(callback);
+    }
+
+    updateEnabledState() {
+        this.container.classList.toggle('joystick-disabled', !this.enabled);
+        this.container.querySelectorAll('.switch-btn').forEach((btn) => {
+            btn.disabled = !this.enabled;
+        });
+        [this.leftCanvas, this.rightCanvas].forEach((canvas) => {
+            if (canvas) {
+                canvas.classList.toggle('disabled', !this.enabled);
+            }
+        });
+        if (this.leftCanvas && this.rightCanvas) {
+            this.drawJoystick(this.leftCanvas, this.leftStick);
+            this.drawJoystick(this.rightCanvas, this.rightStick);
+        }
+    }
+
+    setEnabled(enabled) {
+        if (this.enabled === enabled) {
+            return;
+        }
+        this.enabled = enabled;
+        this.leftStick.isDragging = false;
+        this.rightStick.isDragging = false;
+        this.updateEnabledState();
     }
 
     notifyChange() {
