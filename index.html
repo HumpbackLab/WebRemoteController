@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ELRS Web Remote Control</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>ELRS Web Remote</h1>
+            <div class="connection-status">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <span id="connectionStatus">Disconnected</span>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-primary" id="connectBtn">Connect</button>
+                <button class="btn btn-danger" id="disconnectBtn" disabled>Disconnect</button>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="joystick-area">
+                <div id="joystickContainer"></div>
+            </div>
+
+            <aside class="sidebar">
+                <!-- Mode Selector -->
+                <div class="panel">
+                    <h3>Input Mode</h3>
+                    <div class="mode-selector">
+                        <button class="mode-btn active" id="modeVirtual">Virtual Joystick</button>
+                        <button class="mode-btn" id="modeGamepad">Gamepad</button>
+                    </div>
+
+                    <div class="gamepad-info" id="gamepadInfo" style="display: none;">
+                        <select class="gamepad-select" id="gamepadSelect">
+                            <option value="">Select Gamepad</option>
+                        </select>
+                        <div class="gamepad-status" id="gamepadStatus">No gamepad connected</div>
+                    </div>
+                </div>
+
+                <!-- Link Statistics -->
+                <div class="panel">
+                    <h3>Link Statistics</h3>
+                    <div class="link-stats-grid">
+                        <div class="stat-item">
+                            <span class="stat-label">Uplink RSSI 1</span>
+                            <span class="stat-value" id="statRssi1">--</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Uplink RSSI 2</span>
+                            <span class="stat-value" id="statRssi2">--</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Link Quality</span>
+                            <span class="stat-value" id="statLQ">--</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">SNR</span>
+                            <span class="stat-value" id="statSNR">--</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">RF Mode</span>
+                            <span class="stat-value" id="statRFMode">--</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">TX Power</span>
+                            <span class="stat-value" id="statPower">--</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Downlink RSSI</span>
+                            <span class="stat-value" id="statDownRssi">--</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Downlink LQ</span>
+                            <span class="stat-value" id="statDownLQ">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Telemetry -->
+                <div class="panel">
+                    <h3>Telemetry</h3>
+                    <div class="telemetry-panel">
+                        <div class="telemetry-item">
+                            <div class="label">Voltage</div>
+                            <div class="value" id="telVoltage">-- V</div>
+                        </div>
+                        <div class="telemetry-item">
+                            <div class="label">Current</div>
+                            <div class="value" id="telCurrent">-- A</div>
+                        </div>
+                        <div class="telemetry-item">
+                            <div class="label">Capacity</div>
+                            <div class="value" id="telCapacity">-- mAh</div>
+                        </div>
+                        <div class="telemetry-item">
+                            <div class="label">Flight Mode</div>
+                            <div class="value" id="telMode">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="panel">
+                    <h3>Actions</h3>
+                    <div class="action-buttons">
+                        <button class="btn btn-warning" id="bindBtn" disabled>Bind Mode</button>
+                        <button class="btn btn-primary" id="wifiBtn" disabled>WiFi Mode</button>
+                        <button class="btn btn-danger" id="resetBtn">Reset Sticks</button>
+                    </div>
+                </div>
+
+                <!-- Log -->
+                <div class="panel">
+                    <h3>Log</h3>
+                    <div class="log-panel" id="logPanel"></div>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
