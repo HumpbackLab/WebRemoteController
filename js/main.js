@@ -41,7 +41,7 @@ const elements = {
 // Initialize
 function init() {
     log('Initializing ELRS Web Remote...');
-    elements.wifiBtn.title = 'Direct serial settings command';
+    elements.wifiBtn.title = 'ELRS parameter write command';
     elements.baudRateSelect.value = String(state.baudRate);
     loadBuildInfo();
 
@@ -189,6 +189,7 @@ function setupUIEvents() {
             try {
                 log('Entering Bind Mode...');
                 await elrs.enterBindMode();
+                log('Bind command sent');
             } catch (error) {
                 log(`Bind failed: ${error.message}`);
             }
@@ -205,6 +206,7 @@ function setupUIEvents() {
             try {
                 log('Entering WiFi Mode...');
                 await elrs.enterWifiMode();
+                log('WiFi command sent');
             } catch (error) {
                 log(`WiFi failed: ${error.message}`);
             }
@@ -282,7 +284,7 @@ function startChannelLoop() {
     // Update channel display at 30fps
     setInterval(() => {
         if (joystick) {
-            joystick.updateChannelBars();
+            joystick.updateChannelBars(getCurrentChannels());
         }
     }, 33);
 }

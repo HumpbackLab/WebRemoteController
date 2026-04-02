@@ -118,11 +118,11 @@ export class VirtualJoystick {
         }
     }
 
-    updateChannelBars() {
+    updateChannelBars(channels = this.channels) {
         for (let i = 0; i < 16; i++) {
             const bar = document.getElementById(`chBar${i}`);
             const val = document.getElementById(`chVal${i}`);
-            const value = this.channels[i];
+            const value = channels[i];
             const percent = ((value - CRSF.CRSF_CHANNEL_VALUE_MIN) /
                             (CRSF.CRSF_CHANNEL_VALUE_MAX - CRSF.CRSF_CHANNEL_VALUE_MIN)) * 100;
 

@@ -97,18 +97,19 @@ test('extended DEVICE_INFO frames preserve device name', () => {
     assert.equal(frame.at(-1), expectedCRC(frame));
 });
 
-test('bind command matches handset extended-command addressing', () => {
+test('bind command matches ELRS Lua parameter-write packet', () => {
     const frame = CRSF.buildBindPacket();
-    const telemetry = CRSF.parseTelemetry(frame);
-
-    assert.equal(frame[0], CRSF.CRSF_ADDRESS_RADIO_TRANSMITTER);
-    assert.equal(telemetry.type, 'unknown');
-    assert.equal(telemetry.destAddr, CRSF.CRSF_ADDRESS_CRSF_TRANSMITTER);
-    assert.equal(telemetry.origAddr, CRSF.CRSF_ADDRESS_RADIO_TRANSMITTER);
-    assert.deepEqual(Array.from(telemetry.data), [
-        CRSF.CRSF_COMMAND_SUBCMD_RX,
-        CRSF.CRSF_COMMAND_SUBCMD_RX_BIND
+    assert.deepEqual(Array.from(frame), [
+        0xEE,
+        0x06,
+        0x2D,
+        0xEE,
+        0xEA,
+        CRSF.ELRS_PARAMETER_BIND,
+        0x01,
+        frame[7]
     ]);
+    assert.equal(frame[7], CRSF.calcCRC(frame.subarray(2, 7)));
 });
 
 test('stream parser emits telemetry once a full frame arrives', () => {
@@ -135,15 +136,58 @@ test('stream parser emits telemetry once a full frame arrives', () => {
     assert.equal(seen[0].data.rf_Mode, 2);
 });
 
-test('buildWifiPacket fails closed instead of sending bind', () => {
-    assert.throws(
-        () => CRSF.buildWifiPacket(),
-        /not implemented/i
-    );
+test('wifi command matches ELRS Lua parameter-write packet', () => {
+    const frame = CRSF.buildWifiPacket();
+    assert.deepEqual(Array.from(frame), [
+        0xEE,
+        0x06,
+        0x2D,
+        0xEE,
+        0xEA,
+        CRSF.ELRS_PARAMETER_WIFI,
+        0x01,
+        frame[7]
+    ]);
+    assert.equal(frame[7], CRSF.calcCRC(frame.subarray(2, 7)));
 });
 
 test('settings write packet matches LetsFly direct serial format', () => {
     const frame = CRSF.buildSettingsWritePacket(0x01, 0x00);
     assert.deepEqual(Array.from(frame), [0xEE, 0x06, 0x2D, 0xEE, 0xEA, 0x01, 0x00, frame[7]]);
     assert.equal(frame[7], CRSF.calcCRC(frame.subarray(2, 7)));
+});
+
+test('parameter read packet uses CRSF parameter-read frame type', () => {
+    const frame = CRSF.buildParameterReadPacket(0x1F, 0x00);
+    assert.deepEqual(Array.from(frame), [0xEE, 0x06, 0x2C, 0xEE, 0xEA, 0x1F, 0x00, frame[7]]);
+    assert.equal(frame[7], CRSF.calcCRC(frame.subarray(2, 7)));
+});
+
+test('parameter settings entry parses field metadata from chunk 0', () => {
+    const name = new TextEncoder().encode('Bind');
+    const payload = new Uint8Array(4 + name.length + 1 + 3);
+    payload[0] = 0x2A;
+    payload[1] = 0x00;
+    payload[2] = 0x00;
+    payload[3] = 0x0D;
+    payload.set(name, 4);
+
+    const frame = CRSF.buildExtendedFrame(
+        CRSF.CRSF_FRAMETYPE_PARAMETER_SETTINGS_ENTRY,
+        CRSF.CRSF_ADDRESS_RADIO_TRANSMITTER,
+        CRSF.CRSF_ADDRESS_CRSF_TRANSMITTER,
+        payload
+    );
+
+    const telemetry = CRSF.parseTelemetry(frame);
+    assert.ok(telemetry);
+    assert.equal(telemetry.type, 'parameter_entry');
+    assert.deepEqual(telemetry.data, {
+        fieldId: 0x2A,
+        chunksRemaining: 0,
+        parentId: 0x00,
+        type: 0x0D,
+        name: 'Bind',
+        payload
+    });
 });

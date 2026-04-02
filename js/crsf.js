@@ -21,6 +21,9 @@ export const CRSF_FRAMETYPE_ATTITUDE = 0x1E;
 export const CRSF_FRAMETYPE_FLIGHT_MODE = 0x21;
 export const CRSF_FRAMETYPE_DEVICE_PING = 0x28;
 export const CRSF_FRAMETYPE_DEVICE_INFO = 0x29;
+export const CRSF_FRAMETYPE_PARAMETER_SETTINGS_ENTRY = 0x2B;
+export const CRSF_FRAMETYPE_PARAMETER_READ = 0x2C;
+export const CRSF_FRAMETYPE_PARAMETER_WRITE = 0x2D;
 export const CRSF_FRAMETYPE_COMMAND = 0x32;
 export const CRSF_FRAMETYPE_MSP_REQ = 0x7A;
 export const CRSF_FRAMETYPE_MSP_RESP = 0x7B;
@@ -38,6 +41,16 @@ export const CRSF_ADDRESS_FLIGHT_CONTROLLER = 0xC8;
 export const CRSF_COMMAND_SUBCMD_RX = 0x10;
 export const CRSF_COMMAND_SUBCMD_RX_BIND = 0x01;
 export const CRSF_COMMAND_SUBCMD_RX_WIFI = 0x02; // Custom for ELRS WiFi
+export const ELRS_PARAMETER_PING = 0x00;
+export const ELRS_PARAMETER_WIFI = 0xFE;
+export const ELRS_PARAMETER_BIND = 0xFF;
+export const LUA_COMMAND_STEP_IDLE = 0;
+export const LUA_COMMAND_STEP_CLICK = 1;
+export const LUA_COMMAND_STEP_EXECUTING = 2;
+export const LUA_COMMAND_STEP_ASK_CONFIRM = 3;
+export const LUA_COMMAND_STEP_CONFIRMED = 4;
+export const LUA_COMMAND_STEP_CANCEL = 5;
+export const LUA_COMMAND_STEP_QUERY = 6;
 
 // Precompute CRC8 table
 const crcTable = new Uint8Array(256);
@@ -182,44 +195,47 @@ export function buildRCPacket(channels) {
 }
 
 /**
- * Build a LetsFly-style settings write packet.
- * This is used by some direct USB-TTL serial setups instead of handset discovery.
+ * Build an ELRS parameter write packet for direct serial control.
+ * Packet format matches the ELRS Lua script:
+ * [0xEE][0x06][0x2D][0xEE][0xEA][parameter][value][crc]
  */
-export function buildSettingsWritePacket(command, value) {
+function buildParameterAccessPacket(frameType, parameter, value) {
     const packet = new Uint8Array(8);
     packet[0] = CRSF_ADDRESS_CRSF_TRANSMITTER;
     packet[1] = 6;
-    packet[2] = 0x2D; // TYPE_SETTINGS_WRITE
+    packet[2] = frameType;
     packet[3] = CRSF_ADDRESS_CRSF_TRANSMITTER;
     packet[4] = CRSF_ADDRESS_RADIO_TRANSMITTER;
-    packet[5] = command & 0xFF;
+    packet[5] = parameter & 0xFF;
     packet[6] = value & 0xFF;
     packet[7] = calcCRC(packet.subarray(2, 7));
     return packet;
+}
+
+export function buildSettingsWritePacket(command, value) {
+    return buildParameterAccessPacket(CRSF_FRAMETYPE_PARAMETER_WRITE, command, value);
+}
+
+export function buildParameterReadPacket(parameter, chunk = 0) {
+    return buildParameterAccessPacket(CRSF_FRAMETYPE_PARAMETER_READ, parameter, chunk);
+}
+
+export function buildParameterWritePacket(parameter, value) {
+    return buildParameterAccessPacket(CRSF_FRAMETYPE_PARAMETER_WRITE, parameter, value);
 }
 
 /**
  * Build a Bind command packet
  */
 export function buildBindPacket() {
-    const payload = new Uint8Array([
-        CRSF_COMMAND_SUBCMD_RX,
-        CRSF_COMMAND_SUBCMD_RX_BIND
-    ]);
-    return buildExtendedFrame(
-        CRSF_FRAMETYPE_COMMAND,
-        CRSF_ADDRESS_CRSF_TRANSMITTER,
-        CRSF_ADDRESS_RADIO_TRANSMITTER,
-        payload
-    );
+    return buildSettingsWritePacket(ELRS_PARAMETER_BIND, 0x01);
 }
 
 /**
  * Build a WiFi mode command packet
- * Note: ELRS uses specific MSP commands for WiFi mode
  */
 export function buildWifiPacket() {
-    throw new Error('WiFi mode command is not implemented for this handset yet');
+    return buildSettingsWritePacket(ELRS_PARAMETER_WIFI, 0x01);
 }
 
 /**
@@ -408,6 +424,31 @@ export function parseFlightMode(payload) {
     };
 }
 
+export function parseParameterSettingsEntry(payload) {
+    if (payload.length < 4) return null;
+
+    const fieldId = payload[0];
+    const chunksRemaining = payload[1];
+    const parentId = payload[2];
+    const type = payload[3] & 0x3F;
+
+    let nameEnd = 4;
+    while (nameEnd < payload.length && payload[nameEnd] !== 0) {
+        nameEnd += 1;
+    }
+
+    const name = String.fromCharCode.apply(null, payload.subarray(4, nameEnd));
+
+    return {
+        fieldId,
+        chunksRemaining,
+        parentId,
+        type,
+        name,
+        payload
+    };
+}
+
 /**
  * Check if frame type is an Extended Header frame
  * Extended frames have dest_addr and orig_addr after type
@@ -493,6 +534,10 @@ export function parseTelemetry(data) {
             while (end < payload.length && payload[end] !== 0) end++;
             const deviceName = String.fromCharCode.apply(null, payload.subarray(0, end));
             result.data = { deviceName, destAddr, origAddr, payload };
+            break;
+        case CRSF_FRAMETYPE_PARAMETER_SETTINGS_ENTRY:
+            result.type = 'parameter_entry';
+            result.data = parseParameterSettingsEntry(payload);
             break;
         default:
             result.type = 'unknown';

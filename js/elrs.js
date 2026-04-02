@@ -20,7 +20,8 @@ export class ELRS {
             disconnected: [],
             error: [],
             devicePing: [],
-            deviceInfo: []
+            deviceInfo: [],
+            parameterEntry: []
         };
         this.lastRCData = null;
         this.rcInterval = null;
@@ -30,6 +31,8 @@ export class ELRS {
         this.heartbeatInterval = null;
         this.handshakeState = 'idle'; // idle, pinging, ready
         this.connectionMode = 'direct-serial';
+        this.parameterCache = new Map();
+        this.pendingParameterResolvers = new Map();
 
         this.parser.onTelemetry((telemetry) => {
             this.emit('telemetry', telemetry);
@@ -43,6 +46,8 @@ export class ELRS {
             } else if (telemetry.type === 'device_info') {
                 this.emit('deviceInfo', telemetry.data);
                 this.handleDeviceInfo(telemetry);
+            } else if (telemetry.type === 'parameter_entry' && telemetry.data) {
+                this.handleParameterEntry(telemetry.data);
             }
         });
     }
@@ -92,6 +97,8 @@ export class ELRS {
 
             this.keepReading = true;
             this.parser.reset();
+            this.parameterCache.clear();
+            this.pendingParameterResolvers.clear();
             this.readLoop();
             if (this.connectionMode === 'handset') {
                 this.startHandshake();
@@ -258,6 +265,8 @@ export class ELRS {
         this.handshakeState = 'idle';
         this.connectionMode = 'direct-serial';
         this.parser.reset();
+        this.parameterCache.clear();
+        this.pendingParameterResolvers.clear();
         this.rejectPendingWrites(new Error('Disconnected'));
 
         if (this.reader) {
@@ -340,6 +349,89 @@ export class ELRS {
         await this.sendRaw(packet);
     }
 
+    handleParameterEntry(entry) {
+        this.parameterCache.set(entry.fieldId, entry);
+        this.emit('parameterEntry', entry);
+
+        const resolver = this.pendingParameterResolvers.get(entry.fieldId);
+        if (resolver) {
+            this.pendingParameterResolvers.delete(entry.fieldId);
+            resolver(entry);
+        }
+    }
+
+    async readParameter(fieldId, timeoutMs = 250) {
+        const cached = this.parameterCache.get(fieldId);
+        if (cached && cached.chunksRemaining === 0) {
+            return cached;
+        }
+
+        const packet = CRSF.buildParameterReadPacket(fieldId, 0);
+
+        return new Promise(async (resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                this.pendingParameterResolvers.delete(fieldId);
+                reject(new Error(`Timed out reading parameter ${fieldId}`));
+            }, timeoutMs);
+
+            this.pendingParameterResolvers.set(fieldId, (entry) => {
+                clearTimeout(timeoutId);
+                resolve(entry);
+            });
+
+            try {
+                await this.sendRaw(packet);
+            } catch (error) {
+                clearTimeout(timeoutId);
+                this.pendingParameterResolvers.delete(fieldId);
+                reject(error);
+            }
+        });
+    }
+
+    async findParameterByName(names, maxFieldId = 63) {
+        const wantedNames = Array.isArray(names) ? names : [names];
+
+        for (const entry of this.parameterCache.values()) {
+            if (wantedNames.includes(entry.name)) {
+                return entry;
+            }
+        }
+
+        for (let fieldId = 1; fieldId <= maxFieldId; fieldId += 1) {
+            let entry = this.parameterCache.get(fieldId);
+            if (!entry) {
+                try {
+                    entry = await this.readParameter(fieldId);
+                } catch (_error) {
+                    continue;
+                }
+            }
+
+            if (entry && wantedNames.includes(entry.name)) {
+                return entry;
+            }
+        }
+
+        return null;
+    }
+
+    async sendLuaCommand(names, fallbackPacketBuilder = null) {
+        const entry = await this.findParameterByName(names);
+        if (entry) {
+            const packet = CRSF.buildParameterWritePacket(entry.fieldId, CRSF.LUA_COMMAND_STEP_CLICK);
+            await this.sendRaw(packet);
+            return { mode: 'lua-parameter', entry };
+        }
+
+        if (fallbackPacketBuilder) {
+            await this.sendRaw(fallbackPacketBuilder());
+            return { mode: 'legacy-fallback', entry: null };
+        }
+
+        throw new Error(`Command not found: ${Array.isArray(names) ? names.join(', ') : names}`);
+    }
+
     /**
      * Start sending RC data at specified rate
      */
@@ -374,8 +466,7 @@ export class ELRS {
      * Send Bind command
      */
     async enterBindMode() {
-        const packet = CRSF.buildSettingsWritePacket(0x01, 0x00);
-        await this.sendRaw(packet);
+        await this.sendLuaCommand('Bind', () => CRSF.buildBindPacket());
         console.log('Bind command sent');
     }
 
@@ -383,8 +474,7 @@ export class ELRS {
      * Send WiFi mode command
      */
     async enterWifiMode() {
-        const packet = CRSF.buildSettingsWritePacket(0x02, 0x00);
-        await this.sendRaw(packet);
+        await this.sendLuaCommand(['Enable Rx WiFi', 'Enable WiFi'], () => CRSF.buildWifiPacket());
         console.log('WiFi mode command sent');
     }
 

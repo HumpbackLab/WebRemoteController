@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { ELRS } from '../js/elrs.js';
+import * as CRSF from '../js/crsf.js';
 
 test('connect emits connected as soon as the serial port opens', async () => {
     const originalNavigator = globalThis.navigator;
@@ -67,4 +68,23 @@ test('connect emits connected as soon as the serial port opens', async () => {
             value: originalNavigator
         });
     }
+});
+
+test('sendLuaCommand writes discovered command id as a parameter-write frame', async () => {
+    const elrs = new ELRS();
+    const writes = [];
+
+    elrs.findParameterByName = async (names) => {
+        assert.deepEqual(names, ['Enable Rx WiFi', 'Enable WiFi']);
+        return { fieldId: 37, name: 'Enable Rx WiFi' };
+    };
+    elrs.sendRaw = async (data) => {
+        writes.push(Array.from(data));
+    };
+
+    const result = await elrs.sendLuaCommand(['Enable Rx WiFi', 'Enable WiFi']);
+
+    assert.equal(result.mode, 'lua-parameter');
+    assert.equal(result.entry.fieldId, 37);
+    assert.deepEqual(writes[0], Array.from(CRSF.buildParameterWritePacket(37, CRSF.LUA_COMMAND_STEP_CLICK)));
 });
