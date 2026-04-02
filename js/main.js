@@ -86,6 +86,14 @@ function setupELRSCallbacks() {
     elrs.on('linkStats', (stats) => {
         updateLinkStats(stats);
     });
+
+    elrs.on('devicePing', (data) => {
+        log('DEVICE_PING received from TX');
+    });
+
+    elrs.on('deviceInfo', (data) => {
+        log(`DEVICE_INFO received: ${data.deviceName}`);
+    });
 }
 
 function setupGamepadCallbacks() {

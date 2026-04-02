@@ -219,6 +219,112 @@ export function buildWifiPacket() {
 }
 
 /**
+ * Build an Extended Header frame (DEVICE_PING, DEVICE_INFO, etc.)
+ * Extended frame format: [addr][len][type][dest][orig][payload...][crc]
+ */
+export function buildExtendedFrame(frameType, destAddr, origAddr, payload = new Uint8Array(0)) {
+    const payloadSize = payload.length;
+    // frame_size = dest + orig + payload + crc = 2 + payloadSize + 1 = payloadSize + 3
+    const frameSize = payloadSize + 3;
+    const packet = new Uint8Array(2 + frameSize); // addr + len + [type + dest + orig + payload] + crc
+
+    let idx = 0;
+    packet[idx++] = origAddr;          // device_addr (我们作为发送方)
+    packet[idx++] = frameSize;         // frame_size (after this byte: type + dest + orig + payload + crc)
+    packet[idx++] = frameType;         // type
+    packet[idx++] = destAddr;          // dest_addr (扩展头)
+    packet[idx++] = origAddr;          // orig_addr (扩展头)
+    packet.set(payload, idx);           // payload
+    idx += payloadSize;
+
+    // CRC 从 type (索引 2) 开始计算，长度 = frameSize - 1 (跳过最后的 CRC)
+    const crc = calcCRC(packet.subarray(2, 2 + frameSize - 1));
+    packet[idx] = crc;
+
+    return packet;
+}
+
+/**
+ * Build a DEVICE_PING packet (handset → TX)
+ */
+export function buildDevicePing() {
+    // DEVICE_PING is an extended frame with empty payload
+    return buildExtendedFrame(
+        CRSF_FRAMETYPE_DEVICE_PING,
+        CRSF_ADDRESS_CRSF_TRANSMITTER,  // dest: TX module
+        CRSF_ADDRESS_RADIO_TRANSMITTER   // orig: handset/radio
+    );
+}
+
+/**
+ * Build a DEVICE_INFO response packet (TX → handset, or handset → TX)
+ */
+export function buildDeviceInfo(destAddr, origAddr, deviceName = 'WebRadio') {
+    // Payload format: [device_name][serial(4)][hw_ver(4)][sw_ver(4)][field_cnt(1)][param_ver(1)]
+    const nameBytes = new TextEncoder().encode(deviceName);
+    const payload = new Uint8Array(nameBytes.length + 1 + 4 + 4 + 4 + 1 + 1);
+
+    let idx = 0;
+    payload.set(nameBytes, idx);
+    idx += nameBytes.length;
+    payload[idx++] = 0;  // null terminator for string
+
+    // Serial number: 'ELRS' (0x454C5253)
+    payload[idx++] = 0x45; payload[idx++] = 0x4C;
+    payload[idx++] = 0x52; payload[idx++] = 0x53;
+
+    // Hardware version (0)
+    payload[idx++] = 0x00; payload[idx++] = 0x00;
+    payload[idx++] = 0x00; payload[idx++] = 0x00;
+
+    // Software version (1.0.0)
+    payload[idx++] = 0x00; payload[idx++] = 0x00;
+    payload[idx++] = 0x01; payload[idx++] = 0x00;
+
+    // Field count and parameter version
+    payload[idx++] = 0x00;  // field_cnt
+    payload[idx++] = 0x00;  // parameter_version
+
+    return buildExtendedFrame(
+        CRSF_FRAMETYPE_DEVICE_INFO,
+        destAddr,
+        origAddr,
+        payload
+    );
+}
+
+/**
+ * Build a Link Statistics packet (handset → TX)
+ */
+export function buildLinkStatistics(stats = {}) {
+    const payload = new Uint8Array(10);
+
+    payload[0] = stats.uplink_RSSI_1 || 0;
+    payload[1] = stats.uplink_RSSI_2 || 0;
+    payload[2] = stats.uplink_Link_quality || 100;
+    payload[3] = stats.uplink_SNR || 0;
+    payload[4] = stats.active_antenna || 0;
+    payload[5] = stats.rf_Mode || 0;
+    payload[6] = stats.uplink_TX_Power || 0;
+    payload[7] = stats.downlink_RSSI || 0;
+    payload[8] = stats.downlink_Link_quality || 100;
+    payload[9] = stats.downlink_SNR || 0;
+
+    const packet = new Uint8Array(2 + 1 + 10 + 1); // addr + len + type + payload + crc
+    let idx = 0;
+    packet[idx++] = CRSF_ADDRESS_RADIO_TRANSMITTER;
+    packet[idx++] = 1 + 10 + 1;  // type + payload + crc
+    packet[idx++] = CRSF_FRAMETYPE_LINK_STATISTICS;
+    packet.set(payload, idx);
+    idx += 10;
+
+    const crc = calcCRC(packet.subarray(2, 2 + 1 + 10));
+    packet[idx] = crc;
+
+    return packet;
+}
+
+/**
  * Parse Link Statistics (0x14 frame type)
  */
 export function parseLinkStatistics(payload) {
@@ -300,6 +406,14 @@ export function parseFlightMode(payload) {
 }
 
 /**
+ * Check if frame type is an Extended Header frame
+ * Extended frames have dest_addr and orig_addr after type
+ */
+function isExtendedFrame(frameType) {
+    return frameType >= 0x28 && frameType <= 0x96;
+}
+
+/**
  * Parse a CRSF telemetry packet
  * @param {Uint8Array} data - Complete CRSF packet
  * @returns {object|null} Parsed telemetry data or null
@@ -313,7 +427,20 @@ export function parseTelemetry(data) {
 
     if (data.length < frameSize + 2) return null; // Need at least addr + frameSize bytes
 
-    const payload = data.subarray(3, 2 + frameSize);
+    // Determine payload start based on frame type
+    let payloadStart = 3;
+    let destAddr = null;
+    let origAddr = null;
+
+    if (isExtendedFrame(frameType)) {
+        // Extended Header frame: [addr][len][type][dest][orig][payload...]
+        if (data.length < 6) return null; // Need at least addr + len + type + dest + orig
+        destAddr = data[3];
+        origAddr = data[4];
+        payloadStart = 5;
+    }
+
+    const payload = data.subarray(payloadStart, 2 + frameSize);
     const receivedCRC = data[2 + frameSize];
     // CRC is calculated from type (index 2) onwards, length = frameSize - 1 (skip CRC itself)
     const calculatedCRC = calcCRC(data.subarray(2, 2 + frameSize));
@@ -326,6 +453,8 @@ export function parseTelemetry(data) {
     let result = {
         deviceAddr,
         frameType,
+        destAddr,
+        origAddr,
         raw: data
     };
 
@@ -349,6 +478,18 @@ export function parseTelemetry(data) {
         case CRSF_FRAMETYPE_FLIGHT_MODE:
             result.type = 'flight_mode';
             result.data = parseFlightMode(payload);
+            break;
+        case CRSF_FRAMETYPE_DEVICE_PING:
+            result.type = 'device_ping';
+            result.data = { destAddr, origAddr };
+            break;
+        case CRSF_FRAMETYPE_DEVICE_INFO:
+            result.type = 'device_info';
+            // Parse device info payload
+            let end = 0;
+            while (end < payload.length && payload[end] !== 0) end++;
+            const deviceName = String.fromCharCode.apply(null, payload.subarray(0, end));
+            result.data = { deviceName, destAddr, origAddr, payload };
             break;
         default:
             result.type = 'unknown';
@@ -376,10 +517,13 @@ export class CRSParser {
     pushByte(byte) {
         switch (this.state) {
             case 'IDLE':
+                // Accept all valid CRSF addresses
                 if (byte === CRSF_ADDRESS_RADIO_TRANSMITTER ||
                     byte === CRSF_ADDRESS_CRSF_RECEIVER ||
                     byte === CRSF_ADDRESS_FLIGHT_CONTROLLER ||
-                    byte === CRSF_ADDRESS_CRSF_TRANSMITTER) {
+                    byte === CRSF_ADDRESS_CRSF_TRANSMITTER ||
+                    byte === CRSF_ADDRESS_BROADCAST ||
+                    byte === CRSF_ADDRESS_ELRS_LUA) {
                     this.buffer = [byte];
                     this.state = 'RECEIVING_LENGTH';
                 }

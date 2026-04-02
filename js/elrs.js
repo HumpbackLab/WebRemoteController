@@ -17,13 +17,17 @@ export class ELRS {
             linkStats: [],
             connected: [],
             disconnected: [],
-            error: []
+            error: [],
+            devicePing: [],
+            deviceInfo: []
         };
         this.lastRCData = null;
         this.rcInterval = null;
         this.rcRate = 100; // Hz, default 100Hz update rate
         this.writeQueue = [];
         this.isWriting = false;
+        this.heartbeatInterval = null;
+        this.handshakeState = 'idle'; // idle, pinging, ready
     }
 
     /**
@@ -74,12 +78,21 @@ export class ELRS {
                 this.emit('telemetry', telemetry);
                 if (telemetry.type === 'link_statistics') {
                     this.emit('linkStats', telemetry.data);
+                } else if (telemetry.type === 'device_ping') {
+                    this.emit('devicePing', telemetry.data);
+                    this.handleDevicePing(telemetry);
+                } else if (telemetry.type === 'device_info') {
+                    this.emit('deviceInfo', telemetry.data);
+                    this.handleDeviceInfo(telemetry);
                 }
             });
 
             // Start reading
             this.keepReading = true;
             this.readLoop();
+
+            // Start handset handshake
+            this.startHandshake();
 
             this.emit('connected');
             return true;
@@ -89,6 +102,105 @@ export class ELRS {
                 this.emit('error', error);
             }
             throw error;
+        }
+    }
+
+    /**
+     * Start handset handshake with ELRS TX
+     */
+    startHandshake() {
+        this.handshakeState = 'pinging';
+
+        // Send initial DEVICE_PING
+        this.sendDevicePing();
+
+        // Start periodic heartbeat (send LinkStatistics every 500ms)
+        this.startHeartbeat();
+    }
+
+    /**
+     * Send DEVICE_PING to TX
+     */
+    async sendDevicePing() {
+        if (!this.isConnected()) return;
+        try {
+            const packet = CRSF.buildDevicePing();
+            await this.sendRaw(packet);
+            console.log('DEVICE_PING sent');
+        } catch (e) {
+            console.error('Failed to send DEVICE_PING:', e);
+        }
+    }
+
+    /**
+     * Handle received DEVICE_PING (from TX)
+     */
+    async handleDevicePing(telemetry) {
+        console.log('Received DEVICE_PING from TX');
+        // Respond with DEVICE_INFO
+        try {
+            const packet = CRSF.buildDeviceInfo(
+                telemetry.origAddr || CRSF.CRSF_ADDRESS_CRSF_TRANSMITTER,
+                CRSF.CRSF_ADDRESS_RADIO_TRANSMITTER,
+                'WebRadio'
+            );
+            await this.sendRaw(packet);
+            console.log('DEVICE_INFO sent in response');
+        } catch (e) {
+            console.error('Failed to send DEVICE_INFO:', e);
+        }
+    }
+
+    /**
+     * Handle received DEVICE_INFO (from TX)
+     */
+    handleDeviceInfo(telemetry) {
+        console.log('Received DEVICE_INFO from TX:', telemetry.data.deviceName);
+        this.handshakeState = 'ready';
+    }
+
+    /**
+     * Start periodic heartbeat (LinkStatistics)
+     */
+    startHeartbeat() {
+        this.stopHeartbeat();
+        this.heartbeatInterval = setInterval(() => {
+            this.sendHeartbeat();
+        }, 500);
+    }
+
+    /**
+     * Stop heartbeat
+     */
+    stopHeartbeat() {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+        }
+    }
+
+    /**
+     * Send LinkStatistics heartbeat
+     */
+    async sendHeartbeat() {
+        if (!this.isConnected()) return;
+        try {
+            const stats = {
+                uplink_RSSI_1: 60,
+                uplink_RSSI_2: 65,
+                uplink_Link_quality: 100,
+                uplink_SNR: 10,
+                active_antenna: 0,
+                rf_Mode: 3, // 250Hz
+                uplink_TX_Power: 3, // 100mW
+                downlink_RSSI: 70,
+                downlink_Link_quality: 100,
+                downlink_SNR: 8
+            };
+            const packet = CRSF.buildLinkStatistics(stats);
+            await this.sendRaw(packet);
+        } catch (e) {
+            // Ignore heartbeat errors
         }
     }
 
@@ -123,7 +235,9 @@ export class ELRS {
      */
     async disconnect() {
         this.stopRCSending();
+        this.stopHeartbeat();
         this.keepReading = false;
+        this.handshakeState = 'idle';
 
         // Clear write queue
         this.writeQueue = [];
