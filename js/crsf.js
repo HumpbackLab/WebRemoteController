@@ -165,7 +165,7 @@ export function unpackChannels(packed) {
 export function buildRCPacket(channels) {
     const packedChannels = packChannels(channels);
     const payloadSize = packedChannels.length;
-    const packet = new Uint8Array(2 + payloadSize + 1); // addr + len + type + payload + crc
+    const packet = new Uint8Array(2 + 1 + payloadSize + 1); // addr + len + type + payload + crc
 
     let idx = 0;
     packet[idx++] = CRSF_ADDRESS_FLIGHT_CONTROLLER;
@@ -190,7 +190,7 @@ export function buildBindPacket() {
         CRSF_COMMAND_SUBCMD_RX_BIND
     ]);
 
-    const packet = new Uint8Array(2 + payload.length + 1);
+    const packet = new Uint8Array(2 + 1 + payload.length + 1);
     let idx = 0;
     packet[idx++] = CRSF_ADDRESS_CRSF_RECEIVER;
     packet[idx++] = payload.length + 2;
@@ -210,12 +210,7 @@ export function buildBindPacket() {
  * Note: ELRS uses specific MSP commands for WiFi mode
  */
 export function buildWifiPacket() {
-    // ELRS WiFi mode is typically triggered by MSP command 0x3002 (MSP_ELRS_WIFI)
-    // For now, we'll use a command frame or fall back to just sending bind as placeholder
-    // In practice, you need to send the correct MSP command
-
-    // Placeholder: send the same as bind for now - will need to update with actual WiFi command
-    return buildBindPacket();
+    throw new Error('WiFi mode command is not implemented for this handset yet');
 }
 
 /**
@@ -224,9 +219,9 @@ export function buildWifiPacket() {
  */
 export function buildExtendedFrame(frameType, destAddr, origAddr, payload = new Uint8Array(0)) {
     const payloadSize = payload.length;
-    // frame_size = dest + orig + payload + crc = 2 + payloadSize + 1 = payloadSize + 3
-    const frameSize = payloadSize + 3;
-    const packet = new Uint8Array(2 + frameSize); // addr + len + [type + dest + orig + payload] + crc
+    // frame_size = type + dest + orig + payload + crc
+    const frameSize = payloadSize + 4;
+    const packet = new Uint8Array(2 + frameSize); // addr + len + type + dest + orig + payload + crc
 
     let idx = 0;
     packet[idx++] = origAddr;          // device_addr (我们作为发送方)
@@ -440,10 +435,10 @@ export function parseTelemetry(data) {
         payloadStart = 5;
     }
 
-    const payload = data.subarray(payloadStart, 2 + frameSize);
-    const receivedCRC = data[2 + frameSize];
+    const payload = data.subarray(payloadStart, frameSize + 1);
+    const receivedCRC = data[frameSize + 1];
     // CRC is calculated from type (index 2) onwards, length = frameSize - 1 (skip CRC itself)
-    const calculatedCRC = calcCRC(data.subarray(2, 2 + frameSize));
+    const calculatedCRC = calcCRC(data.subarray(2, frameSize + 1));
 
     if (receivedCRC !== calculatedCRC) {
         console.warn(`CRC mismatch: got ${receivedCRC}, expected ${calculatedCRC}`);
@@ -514,6 +509,12 @@ export class CRSParser {
         this.callbacks.push(callback);
     }
 
+    reset() {
+        this.state = 'IDLE';
+        this.buffer = [];
+        this.expectedLength = 0;
+    }
+
     pushByte(byte) {
         switch (this.state) {
             case 'IDLE':
@@ -543,8 +544,7 @@ export class CRSParser {
                     if (telemetry) {
                         this.callbacks.forEach(cb => cb(telemetry));
                     }
-                    this.state = 'IDLE';
-                    this.buffer = [];
+                    this.reset();
                 }
                 break;
         }

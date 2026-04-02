@@ -38,6 +38,7 @@ const elements = {
 // Initialize
 function init() {
     log('Initializing ELRS Web Remote...');
+    elements.wifiBtn.title = 'WiFi mode command is not implemented yet';
 
     // Create virtual joystick
     joystick = new VirtualJoystick('joystickContainer');
@@ -157,16 +158,28 @@ function setupUIEvents() {
     // Bind button
     elements.bindBtn.addEventListener('click', async () => {
         if (state.connected) {
-            log('Entering Bind Mode...');
-            await elrs.enterBindMode();
+            try {
+                log('Entering Bind Mode...');
+                await elrs.enterBindMode();
+            } catch (error) {
+                log(`Bind failed: ${error.message}`);
+            }
         }
     });
 
     // WiFi button
     elements.wifiBtn.addEventListener('click', async () => {
         if (state.connected) {
-            log('Entering WiFi Mode...');
-            await elrs.enterWifiMode();
+            if (!elrs.supportsWifiMode()) {
+                log('WiFi mode is not available in this build');
+                return;
+            }
+            try {
+                log('Entering WiFi Mode...');
+                await elrs.enterWifiMode();
+            } catch (error) {
+                log(`WiFi failed: ${error.message}`);
+            }
         }
     });
 
@@ -198,7 +211,7 @@ function updateConnectionUI(connected) {
     elements.connectBtn.disabled = connected;
     elements.disconnectBtn.disabled = !connected;
     elements.bindBtn.disabled = !connected;
-    elements.wifiBtn.disabled = !connected;
+    elements.wifiBtn.disabled = !connected || !elrs.supportsWifiMode();
 
     if (connected) {
         // Start sending RC data

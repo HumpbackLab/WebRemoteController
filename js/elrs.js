@@ -28,6 +28,21 @@ export class ELRS {
         this.isWriting = false;
         this.heartbeatInterval = null;
         this.handshakeState = 'idle'; // idle, pinging, ready
+
+        this.parser.onTelemetry((telemetry) => {
+            this.emit('telemetry', telemetry);
+            if (telemetry.type === 'link_statistics') {
+                this.emit('linkStats', telemetry.data);
+                this.markHandshakeReady();
+            } else if (telemetry.type === 'device_ping') {
+                this.emit('devicePing', telemetry.data);
+                this.handleDevicePing(telemetry);
+                this.markHandshakeReady();
+            } else if (telemetry.type === 'device_info') {
+                this.emit('deviceInfo', telemetry.data);
+                this.handleDeviceInfo(telemetry);
+            }
+        });
     }
 
     /**
@@ -59,12 +74,10 @@ export class ELRS {
         }
 
         try {
-            // Request port from user
             this.port = await navigator.serial.requestPort({
-                filters: [] // Allow any USB serial device
+                filters: []
             });
 
-            // Open the port
             await this.port.open({
                 baudRate: baudRate,
                 dataBits: 8,
@@ -73,28 +86,11 @@ export class ELRS {
                 flowControl: 'none'
             });
 
-            // Setup telemetry parser
-            this.parser.onTelemetry((telemetry) => {
-                this.emit('telemetry', telemetry);
-                if (telemetry.type === 'link_statistics') {
-                    this.emit('linkStats', telemetry.data);
-                } else if (telemetry.type === 'device_ping') {
-                    this.emit('devicePing', telemetry.data);
-                    this.handleDevicePing(telemetry);
-                } else if (telemetry.type === 'device_info') {
-                    this.emit('deviceInfo', telemetry.data);
-                    this.handleDeviceInfo(telemetry);
-                }
-            });
-
-            // Start reading
             this.keepReading = true;
+            this.parser.reset();
             this.readLoop();
-
-            // Start handset handshake
             this.startHandshake();
 
-            this.emit('connected');
             return true;
         } catch (error) {
             if (error.name !== 'NotFoundError') {
@@ -105,16 +101,21 @@ export class ELRS {
         }
     }
 
+    markHandshakeReady() {
+        if (this.handshakeState === 'ready') {
+            return;
+        }
+
+        this.handshakeState = 'ready';
+        this.emit('connected');
+    }
+
     /**
      * Start handset handshake with ELRS TX
      */
     startHandshake() {
         this.handshakeState = 'pinging';
-
-        // Send initial DEVICE_PING
         this.sendDevicePing();
-
-        // Start periodic heartbeat (send LinkStatistics every 500ms)
         this.startHeartbeat();
     }
 
@@ -137,7 +138,6 @@ export class ELRS {
      */
     async handleDevicePing(telemetry) {
         console.log('Received DEVICE_PING from TX');
-        // Respond with DEVICE_INFO
         try {
             const packet = CRSF.buildDeviceInfo(
                 telemetry.origAddr || CRSF.CRSF_ADDRESS_CRSF_TRANSMITTER,
@@ -156,7 +156,7 @@ export class ELRS {
      */
     handleDeviceInfo(telemetry) {
         console.log('Received DEVICE_INFO from TX:', telemetry.data.deviceName);
-        this.handshakeState = 'ready';
+        this.markHandshakeReady();
     }
 
     /**
@@ -191,8 +191,8 @@ export class ELRS {
                 uplink_Link_quality: 100,
                 uplink_SNR: 10,
                 active_antenna: 0,
-                rf_Mode: 3, // 250Hz
-                uplink_TX_Power: 3, // 100mW
+                rf_Mode: 3,
+                uplink_TX_Power: 3,
                 downlink_RSSI: 70,
                 downlink_Link_quality: 100,
                 downlink_SNR: 8
@@ -208,7 +208,7 @@ export class ELRS {
      * Read loop for serial data
      */
     async readLoop() {
-        while (this.port.readable && this.keepReading) {
+        while (this.port?.readable && this.keepReading) {
             try {
                 this.reader = this.port.readable.getReader();
 
@@ -220,14 +220,25 @@ export class ELRS {
                     }
                 }
             } catch (error) {
-                console.error('Read error:', error);
-                this.emit('error', error);
+                if (this.keepReading) {
+                    console.error('Read error:', error);
+                    this.emit('error', error);
+                }
             } finally {
                 if (this.reader) {
                     this.reader.releaseLock();
+                    this.reader = null;
                 }
             }
         }
+    }
+
+    rejectPendingWrites(error) {
+        while (this.writeQueue.length > 0) {
+            const { reject } = this.writeQueue.shift();
+            reject(error);
+        }
+        this.isWriting = false;
     }
 
     /**
@@ -238,9 +249,8 @@ export class ELRS {
         this.stopHeartbeat();
         this.keepReading = false;
         this.handshakeState = 'idle';
-
-        // Clear write queue
-        this.writeQueue = [];
+        this.parser.reset();
+        this.rejectPendingWrites(new Error('Disconnected'));
 
         if (this.reader) {
             try {
@@ -248,7 +258,6 @@ export class ELRS {
             } catch (e) {
                 // Ignore
             }
-            this.reader = null;
         }
 
         if (this.port) {
@@ -263,7 +272,7 @@ export class ELRS {
      * Check if connected
      */
     isConnected() {
-        return this.port && this.port.readable;
+        return Boolean(this.port?.readable && this.port?.writable);
     }
 
     /**
@@ -274,7 +283,6 @@ export class ELRS {
             throw new Error('Not connected');
         }
 
-        // Add to queue and wait for our turn
         await new Promise((resolve, reject) => {
             this.writeQueue.push({ data, resolve, reject });
             this.processWriteQueue();
@@ -291,7 +299,7 @@ export class ELRS {
 
         this.isWriting = true;
 
-        while (this.writeQueue.length > 0 && this.port && this.port.writable) {
+        while (this.writeQueue.length > 0 && this.port?.writable) {
             const { data, resolve, reject } = this.writeQueue.shift();
 
             try {
@@ -305,6 +313,11 @@ export class ELRS {
             } catch (error) {
                 reject(error);
             }
+        }
+
+        if (this.writeQueue.length > 0 && !this.port?.writable) {
+            this.rejectPendingWrites(new Error('Port is no longer writable'));
+            return;
         }
 
         this.isWriting = false;
@@ -362,11 +375,13 @@ export class ELRS {
      * Send WiFi mode command
      */
     async enterWifiMode() {
-        // ELRS typically enters WiFi mode by sending a specific command sequence
-        // For now, we'll send bind as placeholder - may need specific MSP commands
         const packet = CRSF.buildWifiPacket();
         await this.sendRaw(packet);
         console.log('WiFi mode command sent');
+    }
+
+    supportsWifiMode() {
+        return false;
     }
 
     /**
