@@ -32,8 +32,8 @@ export class VirtualJoystick {
         this.channels[14] = CRSF.CRSF_CHANNEL_VALUE_MID; // AUX11
         this.channels[15] = CRSF.CRSF_CHANNEL_VALUE_MID; // AUX12
 
-        // Joystick state
-        this.leftStick = { x: 0, y: 0, isDragging: false };
+        // Joystick state (Canvas: y=0 is top, y=+1 is bottom)
+        this.leftStick = { x: 0, y: 1, isDragging: false }; // Throttle starts at bottom (+1)
         this.rightStick = { x: 0, y: 0, isDragging: false };
 
         // Switch states
@@ -95,6 +95,7 @@ export class VirtualJoystick {
 
         // Create channel bars
         this.createChannelBars();
+        this.updateChannelBars();
     }
 
     createChannelBars() {
@@ -104,12 +105,14 @@ export class VirtualJoystick {
         for (let i = 0; i < 16; i++) {
             const bar = document.createElement('div');
             bar.className = 'channel-bar-container';
+            // Throttle (CH3, index 2) shows MIN, others show MID
+            const initialValue = i === 2 ? CRSF.CRSF_CHANNEL_VALUE_MIN : CRSF.CRSF_CHANNEL_VALUE_MID;
             bar.innerHTML = `
                 <div class="channel-label">CH${i + 1}</div>
                 <div class="channel-bar-wrapper">
                     <div class="channel-bar" id="chBar${i}"></div>
                 </div>
-                <div class="channel-value" id="chVal${i}">${CRSF.CRSF_CHANNEL_VALUE_MID}</div>
+                <div class="channel-value" id="chVal${i}">${initialValue}</div>
             `;
             container.appendChild(bar);
         }
@@ -201,7 +204,7 @@ export class VirtualJoystick {
         this.bindStickEvents(this.leftCanvas, this.leftStick, (x, y) => {
             // Left stick: Y = Throttle (CH3), X = Yaw (CH4)
             // Note: y inverted - up is positive throttle
-            this.channels[2] = this.normalizeStickValue(-y); // Throttle (CH3)
+            this.channels[2] = this.normalizeThrottleValue(-y); // Throttle (CH3) - special mapping
             this.channels[3] = this.normalizeStickValue(x);  // Yaw (CH4)
             this.notifyChange();
         });
@@ -282,9 +285,16 @@ export class VirtualJoystick {
     }
 
     normalizeStickValue(v) {
-        // v: -1 to 1
+        // v: -1 to 1 - center at MID
         const range = CRSF.CRSF_CHANNEL_VALUE_MAX - CRSF.CRSF_CHANNEL_VALUE_MID;
         return Math.round(CRSF.CRSF_CHANNEL_VALUE_MID + v * range);
+    }
+
+    normalizeThrottleValue(v) {
+        // v: -1 to 1 - maps MIN (-1) to MAX (+1), no center
+        // -1 = MIN (throttle low), +1 = MAX (throttle high)
+        const fullRange = CRSF.CRSF_CHANNEL_VALUE_MAX - CRSF.CRSF_CHANNEL_VALUE_MIN;
+        return Math.round(CRSF.CRSF_CHANNEL_VALUE_MIN + (v + 1) / 2 * fullRange);
     }
 
     toggleSwitch(index, btn) {
@@ -346,9 +356,9 @@ export class VirtualJoystick {
         this.channels[2] = CRSF.CRSF_CHANNEL_VALUE_MIN;  // Throttle (min)
         this.channels[3] = CRSF.CRSF_CHANNEL_VALUE_MID; // Yaw
 
-        // Reset sticks UI
+        // Reset sticks UI (Canvas: y=0 is top, y=+1 is bottom)
         this.leftStick.x = 0;
-        this.leftStick.y = -1; // Throttle at min
+        this.leftStick.y = 1; // Throttle at min (bottom)
         this.rightStick.x = 0;
         this.rightStick.y = 0;
 
