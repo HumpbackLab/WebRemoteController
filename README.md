@@ -122,6 +122,28 @@ web_radiocontroller/
 - Gamepad API
 - ES6 Modules
 
+## GitHub Pages 部署
+
+仓库已包含 GitHub Pages 工作流：
+
+- [.github/workflows/deploy-pages.yml](/home/ncer/web_radiocontroller/.github/workflows/deploy-pages.yml)
+
+发布步骤：
+
+1. 将代码推送到 `master` 分支，或在 GitHub Actions 页面手动运行 `Deploy GitHub Pages`
+2. 打开仓库 `Settings > Pages`
+3. 将 `Source` 设置为 `GitHub Actions`
+
+默认发布地址：
+
+- `https://humpbacklab.github.io/WebRemoteController/`
+
+说明：
+
+- 这是纯静态页面，适合直接部署到 GitHub Pages
+- GitHub Pages 提供 HTTPS，满足 Web Serial API 的安全上下文要求
+- 功能仍依赖支持 Web Serial API 的桌面浏览器
+
 ## 安全警告
 
 这是一个用于航模遥控器的项目。请务必：
